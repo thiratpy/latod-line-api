@@ -1,73 +1,51 @@
-// Bro, make sure to run: npm install express axios dotenv
-// And create your .env file!
 
 import express from 'express';
 import axios from 'axios';
+import mqtt from 'mqtt'; // 
 import 'dotenv/config';
 
 const app = express();
 const PORT = process.env.PORT || 3000;
 
-// --- YOUR CONFIG - PULLS FROM .ENV FILE ---
-// The chatbot service you already have
 const EXISTING_CHATBOT_WEBHOOK_URL = process.env.EXISTING_CHATBOT_WEBHOOK_URL;
-// Your channel token for sending push messages
 const LINE_CHANNEL_ACCESS_TOKEN = process.env.LINE_CHANNEL_ACCESS_TOKEN;
+const MQTT_BROKER_URL = process.env.MQTT_BROKER_URL;
+const MQTT_USERNAME = process.env.MQTT_USERNAME;
+const MQTT_PASSWORD = process.env.MQTT_PASSWORD;
+const MQTT_TOPIC = process.env.MQTT_TOPIC;
 
-// Middleware to parse JSON bodies
+const LINE_API_BROADCAST_URL = 'https://api.line.me/v2/bot/message/broadcast';
+
 app.use(express.json());
 
 
 // =================================================================
-// 1. WEBHOOK FORWARDER 📲 ➡️ 🤖
-// This is the URL you will give to LINE.
-// It catches the request and forwards it to your real chatbot.
+// PART 1: WEBHOOK FORWARDER (Unchanged) 📲 ➡️ 🤖
+// Forwards user messages to your existing chatbot.
 // =================================================================
 app.post('/webhook', async (req, res) => {
     console.log('Received webhook from LINE. Forwarding now...');
-    
-    // The signature from LINE is important for verification by the target service
     const lineSignature = req.headers['x-line-signature'];
-
     try {
-        // Forward the *exact same request body* to your existing chatbot URL
         await axios.post(EXISTING_CHATBOT_WEBHOOK_URL, req.body, {
-            headers: {
-                'Content-Type': 'application/json',
-                // Pass the signature along so your chatbot service can verify it
-                'X-Line-Signature': lineSignature 
-            }
+            headers: { 'Content-Type': 'application/json', 'X-Line-Signature': lineSignature }
         });
         console.log('Successfully forwarded webhook to:', EXISTING_CHATBOT_WEBHOOK_URL);
     } catch (error) {
-        // Even if forwarding fails, we don't want LINE to retry.
-        // Log the error for debugging.
         console.error('Error forwarding webhook:', error.message);
     }
-
-    // IMPORTANT: Always send a 200 OK back to LINE immediately.
-    // This tells LINE "I got the message, we're good".
-    // Your abdul.in.th service will handle the actual reply to the user.
     res.status(200).send('OK');
 });
 
 
 // =================================================================
-// 2. YOUR AUTO-SENDER SERVICE 📢 ➡️ 👤
-// Create a custom endpoint to trigger push messages.
-// Make it a POST request to keep it secure.
+// PART 2: THE MQTT-POWERED BROADCASTER 📢 ➡️ 👥
+// This sends a message to ALL your OA followers.
 // =================================================================
-app.post('/send-push', async (req, res) => {
-    const { userId, message } = req.body; // Expecting { "userId": "...", "message": "..." }
-
-    if (!userId || !message) {
-        return res.status(400).json({ error: 'Bruh, send me a userId and a message.' });
-    }
-
-    console.log(`Sending push message to ${userId}: "${message}"`);
+async function sendBroadcastMessage(message) {
+    console.log(`Broadcasting message to all users: "${message}"`);
     try {
-        await axios.post('https://api.line.me/v2/bot/message/push', {
-            to: userId,
+        await axios.post(LINE_API_BROADCAST_URL, {
             messages: [{
                 type: 'text',
                 text: message
@@ -78,18 +56,54 @@ app.post('/send-push', async (req, res) => {
                 'Authorization': `Bearer ${LINE_CHANNEL_ACCESS_TOKEN}`
             }
         });
-        console.log('Push message sent successfully.');
-        res.status(200).json({ success: true, message: 'Push message sent!' });
+        console.log('✅ Broadcast sent successfully!');
     } catch (error) {
-        console.error('Error sending push message:', error.response ? error.response.data : error.message);
-        res.status(500).json({ success: false, error: 'Failed to send push message.' });
+        console.error('❌ Error sending broadcast:', error.response ? error.response.data : error.message);
     }
-});
+}
 
+
+// =================================================================
+// PART 3: CONNECT TO HIVEMQ AND LISTEN 📡
+// This section connects to your MQTT broker and waits for messages.
+// =================================================================
+if (!MQTT_BROKER_URL) {
+    console.warn('⚠️ MQTT_BROKER_URL is not set. MQTT client will not start.');
+} else {
+    console.log('Connecting to MQTT Broker...');
+    const mqttClient = mqtt.connect(MQTT_BROKER_URL, {
+        username: MQTT_USERNAME,
+        password: MQTT_PASSWORD
+    });
+
+    mqttClient.on('connect', () => {
+        console.log('✅ Successfully connected to HiveMQ Broker!');
+        // Subscribe to the topic once connected
+        mqttClient.subscribe(MQTT_TOPIC, (err) => {
+            if (!err) {
+                console.log(`📡 Subscribed to topic: ${MQTT_TOPIC}`);
+            } else {
+                console.error('❌ MQTT Subscription error:', err);
+            }
+        });
+    });
+
+    // This is the magic part ✨
+    mqttClient.on('message', (topic, payload) => {
+        const message = payload.toString();
+        console.log(`Received message from MQTT topic "${topic}": ${message}`);
+        
+        // When a message comes in, broadcast it to all LINE users
+        sendBroadcastMessage(message);
+    });
+
+    mqttClient.on('error', (err) => {
+        console.error('❌ MQTT Connection Error:', err);
+    });
+}
 
 // Start the server
 app.listen(PORT, () => {
-    console.log(`🚀 Proxy server is vibin' on port ${PORT}`);
-    console.log('Listening for webhooks at /webhook to forward them.');
-    console.log('Ready to send push messages at /send-push.');
+    console.log(`🚀 Server is vibin' on port ${PORT}`);
+    console.log('Proxy is live at /webhook.');
 });
