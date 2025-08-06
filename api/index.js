@@ -78,6 +78,22 @@ Status: Everything looks OK! ✅🤙
   }
 });
 
+app.get('/echo', (req, res) => {
+  console.log('Received a request!');
+
+  // Construct a response object with all the juicy details from the request
+  const responseObject = {
+    message: "🤙 Echo successful!",
+    method: req.method,
+    query_params: req.query,
+    body: req.body,
+    headers: req.headers,
+  };
+
+  // Send the response object back to the client as JSON
+  res.status(200).json(responseObject);
+});
+
 // --- Export the app for Vercel ---
 // DO NOT USE app.listen()
 module.exports = app;
