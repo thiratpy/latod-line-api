@@ -2,7 +2,7 @@
 require('dotenv').config();
 
 const express = require('express');
-import { createClient } from "https://esm.sh/@supabase/supabase-js";
+const { createClient } = require('@supabase/supabase-js'); // ✅ Corrected this line
 const cors = require('cors');
 
 // --- Initialize App & Supabase ---
@@ -26,13 +26,11 @@ if (!supabaseUrl || !supabaseKey) {
 const supabase = createClient(supabaseUrl, supabaseKey);
 
 app.get("/", (req, res) => {
-    res.json({ message: "API is working!" });
+    res.json({ message: "API is working! Welcome." });
 });
 
 // --- The API Endpoint ---
 app.get('/status', async (req, res) => {
-  // The rest of your endpoint code is PERFECT and doesn't need to change.
-  // ... (the entire try/catch block from before goes here)
   try {
     const { data, error } = await supabase
       .from('farm_status')
@@ -54,7 +52,7 @@ app.get('/status', async (req, res) => {
     const time = now.toLocaleTimeString("en-US", { timeZone: "Asia/Bangkok", hour12: true });
 
     const message = `
-🌊 ** Latod Farm Status Update ** ✨
+🌊 **Latod Farm Status Update** ✨
 
 🗓️ วันที่: ${date}
 ⏰ เวลา: ${time}
@@ -79,7 +77,6 @@ Status: Everything looks OK! ✅🤙
     res.status(500).type('text/plain').send('💀 Oh no! A wild server error appeared.');
   }
 });
-
 
 // --- Export the app for Vercel ---
 // DO NOT USE app.listen()
